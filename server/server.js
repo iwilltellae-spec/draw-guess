@@ -6,10 +6,12 @@ import cors from "cors";
 import { WORDS } from "./words.js";
 import { PICTURES_META } from "./pictures.js";
 
+const SERVER_VERSION = "coop-1.0"; // версия для проверки, что Render обновился
+
 const app = express();
 app.use(cors());
-app.get("/", (_req, res) => res.send("Draw & Guess server is running 💕"));
-app.get("/health", (_req, res) => res.json({ ok: true, rooms: rooms.size }));
+app.get("/", (_req, res) => res.send("Draw & Guess server is running 💕 — version: " + SERVER_VERSION + ", coop: ON"));
+app.get("/health", (_req, res) => res.json({ ok: true, version: SERVER_VERSION, coop: true, pictures: PICTURES_META.length, rooms: rooms.size }));
 
 const httpServer = createServer(app);
 const io = new Server(httpServer, {

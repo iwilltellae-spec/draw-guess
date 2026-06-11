@@ -1,0 +1,20 @@
+{
+  "name": "draw-guess-server",
+  "version": "1.0.0",
+  "description": "Socket.IO сервер для игры Рисуй & Угадай (Telegram Web App)",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "socket.io": "^4.7.5",
+    "socket.io-client": "^4.8.3"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

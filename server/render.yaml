@@ -1,0 +1,10 @@
+# Этот файл подсказывает Render, как запускать сервер.
+# Если будешь настраивать вручную через сайт — он не обязателен.
+services:
+  - type: web
+    name: draw-guess-server
+    runtime: node
+    rootDir: server
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start

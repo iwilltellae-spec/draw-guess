@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>Рисуй & Угадай 💕</title>
+  <link rel="stylesheet" href="style.css" />
+  <!-- Telegram Web App SDK -->
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+</head>
+<body>
+  <div id="app">
+
+    <!-- ЭКРАН 1: Лобби -->
+    <section class="screen screen--lobby is-active" id="lobby">
+      <div class="hearts-bg" aria-hidden="true"></div>
+      <div class="card glass">
+        <div class="logo">
+          <span class="logo__emoji">🎨</span>
+          <h1>Рисуй <span class="amp">&amp;</span> Угадай</h1>
+          <p class="logo__sub">игра для двоих 💕</p>
+        </div>
+
+        <label class="field">
+          <span>Твоё имя</span>
+          <input id="nameInput" type="text" maxlength="16" placeholder="Например, Зайка" autocomplete="off" />
+        </label>
+
+        <div class="rounds-pick">
+          <span class="rounds-pick__label">Раундов в игре</span>
+          <div class="rounds-pick__row">
+            <button type="button" class="round-opt" data-rounds="2">2</button>
+            <button type="button" class="round-opt is-active" data-rounds="6">6</button>
+            <button type="button" class="round-opt" data-rounds="10">10</button>
+            <button type="button" class="round-opt" data-rounds="20">20</button>
+            <input type="number" id="roundsCustom" min="1" max="99" placeholder="свои" />
+          </div>
+        </div>
+
+        <div class="lobby-actions">
+          <button class="btn btn--primary" id="createBtn">Создать комнату</button>
+          <div class="divider"><span>или</span></div>
+          <div class="join-row">
+            <input id="roomInput" type="text" maxlength="6" placeholder="КОД" autocomplete="off" />
+            <button class="btn btn--ghost" id="joinBtn">Войти</button>
+          </div>
+        </div>
+
+        <p class="hint" id="lobbyHint">Один создаёт комнату — другой вводит код 👫</p>
+
+        <div class="stats-box" id="statsBox" hidden>
+          <div class="stats-box__title">📊 Ваша статистика</div>
+          <div class="stats-grid">
+            <div class="stat"><b id="stGames">0</b><span>игр</span></div>
+            <div class="stat"><b id="stWins">0</b><span>побед</span></div>
+            <div class="stat"><b id="stGuessed">0</b><span>угадано</span></div>
+            <div class="stat"><b id="stPoints">0</b><span>очков всего</span></div>
+          </div>
+          <button class="btn btn--text" id="resetStatsBtn">Сбросить статистику</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ЭКРАН 2: Ожидание второго игрока -->
+    <section class="screen screen--wait" id="waitRoom">
+      <div class="hearts-bg" aria-hidden="true"></div>
+      <div class="card glass">
+        <h2>Комната готова!</h2>
+        <p class="wait-sub">Скажи второму игроку этот код:</p>
+        <div class="room-code" id="roomCodeBig">----</div>
+        <button class="btn btn--ghost btn--small" id="copyCodeBtn">📋 Скопировать код</button>
+        <div class="spinner"></div>
+        <p class="hint" id="waitHint">Ждём, когда подключится второй игрок…</p>
+        <button class="btn btn--text" id="leaveWaitBtn">← Выйти</button>
+      </div>
+    </section>
+
+    <!-- ЭКРАН 3: Игра -->
+    <section class="screen screen--game" id="game">
+      <header class="topbar glass">
+        <div class="topbar__left">
+          <span class="round-pill" id="roundPill">Раунд 1</span>
+        </div>
+        <div class="topbar__center" id="wordZone">
+          <span class="word-mask" id="wordDisplay">_ _ _ _</span>
+        </div>
+        <div class="topbar__right">
+          <span class="timer" id="timer">--</span>
+        </div>
+      </header>
+
+      <div class="scoreboard glass">
+        <div class="player" id="p1">
+          <div class="player__avatar" id="p1avatar">🐱</div>
+          <div class="player__info">
+            <span class="player__name">—</span>
+            <span class="player__role" id="p1role"></span>
+          </div>
+          <span class="player__score" id="p1score">0</span>
+        </div>
+        <div class="vs">💕</div>
+        <div class="player" id="p2">
+          <span class="player__score" id="p2score">0</span>
+          <div class="player__info player__info--right">
+            <span class="player__name">—</span>
+            <span class="player__role" id="p2role"></span>
+          </div>
+          <div class="player__avatar" id="p2avatar">🐰</div>
+        </div>
+      </div>
+
+      <div class="banner" id="roleBanner"></div>
+
+      <div class="canvas-wrap">
+        <canvas id="board"></canvas>
+        <div class="guess-badge" id="canvasLock">
+          <span id="lockText">👀 Угадывай!</span>
+        </div>
+      </div>
+
+      <!-- Панель инструментов рисующего (показывается только тому, кто рисует) -->
+      <div class="tools glass" id="tools">
+        <div class="colors" id="colors"></div>
+        <div class="tools__actions">
+          <label class="tool-btn color-pick" id="colorPickWrap" title="Любой цвет">
+            <span class="color-pick__dot" id="colorDot"></span>
+            <input type="color" id="colorPicker" value="#3a2b4a" />
+          </label>
+          <button class="tool-btn" id="eraserBtn" title="Ластик">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M16.24 3.56l4.2 4.2a1.5 1.5 0 0 1 0 2.12L11.5 18.8a2 2 0 0 1-1.42.59H5.6a1 1 0 0 1-.7-.3l-2.1-2.1a1.5 1.5 0 0 1 0-2.12l9.72-9.72a2 2 0 0 1 2.83 0z"/>
+              <path d="M7 17.5L13.5 11"/>
+            </svg>
+          </button>
+          <button class="tool-btn" id="clearBtn" title="Очистить всё">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2m2 0v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V6"/>
+              <path d="M10 11v6M14 11v6"/>
+            </svg>
+          </button>
+        </div>
+        <label class="brush">
+          <input type="range" id="brushSize" min="2" max="40" value="6" />
+        </label>
+      </div>
+
+      <!-- Поле ввода догадки (показывается только тому, кто угадывает) -->
+      <form class="guessbar glass hidden" id="guessForm">
+        <input id="guessInput" type="text" placeholder="Напиши догадку…" autocomplete="off" />
+        <button type="submit" class="btn btn--primary btn--round">➤</button>
+      </form>
+    </section>
+
+  </div>
+
+  <!-- Тост-уведомления -->
+  <div id="toast" class="toast"></div>
+
+  <!-- Оверлей конца раунда / победителя -->
+  <div class="overlay" id="overlay">
+    <div class="overlay__card glass">
+      <div class="overlay__emoji" id="overlayEmoji">🎉</div>
+      <h2 id="overlayTitle">Угадано!</h2>
+      <p id="overlayText"></p>
+      <button class="btn btn--primary" id="overlayBtn">Дальше →</button>
+    </div>
+  </div>
+
+  <!-- Настройка адреса сервера лежит в отдельном файле config.js (его легко править) -->
+  <script src="config.js"></script>
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <script src="words.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

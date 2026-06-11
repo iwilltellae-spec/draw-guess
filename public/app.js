@@ -128,9 +128,14 @@
   // =========================================================
   let socket = null;
   function connect() {
+    // если адрес сервера не настроен — сразу понятная подсказка
+    if (!window.SERVER_CONFIGURED) {
+      toast("⚠️ Не вписан адрес сервера в config.js");
+      return;
+    }
     socket = io(window.SERVER_URL, { transports: ["websocket", "polling"] });
 
-    socket.on("connect_error", () => toast("Не получается подключиться к серверу 😕"));
+    socket.on("connect_error", () => toast("Не получается подключиться к серверу 😕 (сервер спит ~30 сек или неверный адрес)"));
 
     socket.on("room:created", ({ room, mode }) => {
       state.room = room;

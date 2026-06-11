@@ -11,7 +11,7 @@
    ВАЖНО: адрес в кавычках, БЕЗ слэша "/" в конце.
    ========================================================= */
 
-const MY_SERVER = "https://draw-guess-server-tjpo.onrender.com";
+const MY_SERVER = "https://draw-guess-q17m.onrender.com";
 
 /* ↓↓↓ ниже ничего трогать не нужно ↓↓↓ */
 const isLocal = location.hostname === "localhost" || location.hostname === "127.0.0.1";

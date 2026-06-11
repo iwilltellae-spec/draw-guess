@@ -42,6 +42,19 @@ function drawWord(room) {
   return room.deck.pop();
 }
 
+// Три РАЗНЫХ слова на выбор
+function drawChoices(room, n = 3) {
+  const out = [];
+  const seen = new Set();
+  let guard = 0;
+  while (out.length < n && guard < 50) {
+    const w = drawWord(room);
+    if (!seen.has(w)) { seen.add(w); out.push(w); }
+    guard++;
+  }
+  return out;
+}
+
 function makeCode() {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   let code;
@@ -90,8 +103,11 @@ function startGame(room) {
   nextRound(room);
 }
 
+// Этап 1: выбор слова. Рисующему даём 3 варианта на выбор.
 function nextRound(room) {
   if (room.timer) clearInterval(room.timer);
+  room.timer = null;
+  if (room.chooseTimer) clearTimeout(room.chooseTimer);
   room.round += 1;
 
   if (room.round > room.totalRounds) return endGame(room);
@@ -100,11 +116,52 @@ function nextRound(room) {
   // Чередуем рисующего
   room.drawerIndex = (room.drawerIndex + 1) % room.players.length;
   room.drawerId = room.players[room.drawerIndex].id;
-  room.word = drawWord(room);
+  room.word = null;
   room.guessed = false;
-  room.timeLeft = ROUND_TIME;
+  room.phase = "choosing";
+
+  // три уникальных слова на выбор
+  room.choices = drawChoices(room, 3);
 
   io.to(room.code).emit("room:update", { players: publicPlayers(room) });
+
+  // рисующему — выбор из 3 слов; угадывающему — экран ожидания
+  room.players.forEach((p) => {
+    if (p.id === room.drawerId) {
+      io.to(p.id).emit("round:choose", {
+        round: room.round, totalRounds: room.totalRounds,
+        drawerId: room.drawerId, choices: room.choices,
+      });
+    } else {
+      io.to(p.id).emit("round:waiting", {
+        round: room.round, totalRounds: room.totalRounds,
+        drawerId: room.drawerId, drawerName: drawerName(room),
+      });
+    }
+  });
+
+  // если рисующий долго не выбирает (20 сек) — выбираем случайно за него
+  room.chooseTimer = setTimeout(() => {
+    if (room.phase === "choosing" && room.choices) {
+      beginRound(room, room.choices[Math.floor(Math.random() * room.choices.length)]);
+    }
+  }, 20000);
+}
+
+function drawerName(room) {
+  const d = room.players.find((p) => p.id === room.drawerId);
+  return d ? d.name : "";
+}
+
+// Этап 2: слово выбрано — стартуем сам раунд и таймер.
+function beginRound(room, word) {
+  if (room.chooseTimer) { clearTimeout(room.chooseTimer); room.chooseTimer = null; }
+  if (room.phase !== "choosing") return;
+  room.phase = "playing";
+  room.word = word;
+  room.choices = null;
+  room.timeLeft = ROUND_TIME;
+  room.roundEndsAt = Date.now() + ROUND_TIME * 1000; // абсолютное время конца (для антилага)
 
   // Каждому — своя версия события (слово только рисующему)
   room.players.forEach((p) => {
@@ -114,20 +171,27 @@ function nextRound(room) {
       totalRounds: room.totalRounds,
       word: p.id === room.drawerId ? room.word : null,
       maskLength: room.word.length,
+      timeLeft: room.timeLeft,
     });
   });
 
   io.to(room.code).emit("timer:tick", room.timeLeft);
+  if (room.timer) clearInterval(room.timer);
   room.timer = setInterval(() => {
-    room.timeLeft -= 1;
-    io.to(room.code).emit("timer:tick", room.timeLeft);
-    if (room.timeLeft <= 0) endRound(room, false);
+    // считаем оставшееся время от АБСОЛЮТНОГО момента конца —
+    // так таймер не «уплывает» при лагах и одинаков у обоих игроков
+    const left = Math.max(0, Math.round((room.roundEndsAt - Date.now()) / 1000));
+    room.timeLeft = left;
+    io.to(room.code).emit("timer:tick", left);
+    if (left <= 0) endRound(room, false);
   }, 1000);
 }
 
 function endRound(room, guessed) {
   if (room.timer) clearInterval(room.timer);
   room.timer = null;
+  room.phase = "ended";
+  room.roundEndsAt = null;
   io.to(room.code).emit("round:end", {
     word: room.word,
     guessed,
@@ -185,6 +249,25 @@ io.on("connection", (socket) => {
     socket.to(code).emit("draw:clear");
   });
 
+  // Рисующий выбрал слово из трёх предложенных
+  socket.on("word:chosen", ({ room: code, word }) => {
+    const room = getRoom(code);
+    if (!room || socket.id !== room.drawerId) return;
+    if (room.phase !== "choosing") return;
+    // защита: принимаем только одно из предложенных слов
+    const valid = room.choices && room.choices.includes(word) ? word
+      : (room.choices ? room.choices[0] : null);
+    if (valid) beginRound(room, valid);
+  });
+
+  // Антилаг: клиент может попросить актуальное оставшееся время
+  socket.on("timer:sync", ({ room: code }) => {
+    const room = getRoom(code);
+    if (!room || room.phase !== "playing" || !room.roundEndsAt) return;
+    const left = Math.max(0, Math.round((room.roundEndsAt - Date.now()) / 1000));
+    socket.emit("timer:tick", left);
+  });
+
   socket.on("guess:try", ({ room: code, text }) => {
     const room = getRoom(code);
     if (!room || !room.word || room.guessed) return;
@@ -228,6 +311,7 @@ io.on("connection", (socket) => {
       if (idx !== -1) {
         room.players.splice(idx, 1);
         if (room.timer) clearInterval(room.timer);
+        if (room.chooseTimer) clearTimeout(room.chooseTimer);
         socket.to(room.code).emit("player:left");
         if (room.players.length === 0) rooms.delete(room.code);
         else io.to(room.code).emit("room:update", { players: publicPlayers(room) });

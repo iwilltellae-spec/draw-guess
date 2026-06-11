@@ -156,6 +156,26 @@
   <!-- Тост-уведомления -->
   <div id="toast" class="toast"></div>
 
+  <!-- Выбор слова (для рисующего) / ожидание (для угадывающего) -->
+  <div class="overlay" id="chooseOverlay">
+    <div class="overlay__card glass">
+      <!-- Рисующему: выбор из 3 слов -->
+      <div id="chooseForDrawer">
+        <div class="overlay__emoji">✏️</div>
+        <h2>Выбери слово</h2>
+        <p>Что будешь рисовать? <span id="chooseTimerTxt"></span></p>
+        <div class="choose-words" id="chooseWords"></div>
+      </div>
+      <!-- Угадывающему: ожидание -->
+      <div id="chooseForGuesser" hidden>
+        <div class="overlay__emoji">⏳</div>
+        <h2>Подожди чуть-чуть…</h2>
+        <p id="chooseWaitText">Партнёр выбирает слово</p>
+        <div class="spinner"></div>
+      </div>
+    </div>
+  </div>
+
   <!-- Оверлей конца раунда / победителя -->
   <div class="overlay" id="overlay">
     <div class="overlay__card glass">
@@ -171,5 +191,6 @@
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
   <script src="words.js"></script>
   <script src="app.js"></script>
+<script defer src="https://static.cloudflareinsights.com/beacon.min.js/v833ccba57c9e4d2798f2e76cebdd09a11778172276447" integrity="sha512-57MDmcccJXYtNnH+ZiBwzC4jb2rvgVCEokYN+L/nLlmO8rfYT/gIpW2A569iJ/3b+0UEasghjuZH/ma3wIs/EQ==" data-cf-beacon='{"version":"2024.11.0","token":"1954b47c125f43f8b4338b3c4f804e4f","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
 </body>
 </html>

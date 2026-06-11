@@ -46,6 +46,13 @@
   }
   window.addEventListener("resize", applyTelegramInsets);
 
+  // Антилаг: когда возвращаемся в приложение — просим у сервера актуальное время
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && socket && state.room) {
+      socket.emit("timer:sync", { room: state.room });
+    }
+  });
+
   // ---- DOM ----
   const $ = (id) => document.getElementById(id);
   const screens = {
@@ -118,7 +125,6 @@
   function connect() {
     socket = io(window.SERVER_URL, { transports: ["websocket", "polling"] });
 
-    socket.on("connect", () => { state.myId = socket.id; });
     socket.on("connect_error", () => toast("Не получается подключиться к серверу 😕"));
 
     socket.on("room:created", ({ room }) => {
@@ -136,6 +142,8 @@
       renderScoreboard();
     });
 
+    socket.on("round:choose", (d) => onRoundChoose(d));
+    socket.on("round:waiting", (d) => onRoundWaiting(d));
     socket.on("game:start", (data) => onGameStart(data));
     socket.on("draw:stroke", (s) => remoteStroke(s));
     socket.on("draw:clear", () => clearCanvas(false));
@@ -147,6 +155,11 @@
     socket.on("player:left", () => {
       toast("Партнёр вышел из игры 💔");
       setTimeout(() => location.reload(), 1500);
+    });
+    // при переподключении просим у сервера актуальное время (антилаг)
+    socket.on("connect", () => {
+      state.myId = socket.id;
+      if (state.room) socket.emit("timer:sync", { room: state.room });
     });
   }
 
@@ -228,9 +241,77 @@
   $("leaveWaitBtn").addEventListener("click", () => location.reload());
 
   // =========================================================
+  //  ВЫБОР СЛОВА (перед раундом)
+  // =========================================================
+  let chooseCountdown = null;
+
+  function hideChoose() {
+    $("chooseOverlay").classList.remove("show");
+    if (chooseCountdown) { clearInterval(chooseCountdown); chooseCountdown = null; }
+  }
+
+  // Рисующему — показываем 3 слова на выбор
+  function onRoundChoose({ round, totalRounds, drawerId, choices }) {
+    showScreen("game");
+    if (round === 1) gameCounted = false;
+    state.isDrawer = true;
+    state.canDraw = false; // рисовать ещё нельзя, пока не выбрал
+    // подготовим экран (но контент покажем после выбора)
+    $("roundPill").textContent = `Раунд ${round}/${totalRounds}`;
+    clearCanvas(false);
+    $("tools").classList.add("hidden");
+    $("guessForm").classList.add("hidden");
+
+    // настроим оверлей выбора
+    $("chooseForDrawer").hidden = false;
+    $("chooseForGuesser").hidden = true;
+    const box = $("chooseWords");
+    box.innerHTML = "";
+    choices.forEach((w) => {
+      const b = document.createElement("button");
+      b.className = "choose-word";
+      b.textContent = w;
+      b.addEventListener("click", () => {
+        socket?.emit("word:chosen", { room: state.room, word: w });
+        hideChoose();
+      });
+      box.appendChild(b);
+    });
+    $("chooseOverlay").classList.add("show");
+
+    // обратный отсчёт (20 сек — потом сервер выберет сам)
+    let left = 20;
+    $("chooseTimerTxt").textContent = `(${left})`;
+    if (chooseCountdown) clearInterval(chooseCountdown);
+    chooseCountdown = setInterval(() => {
+      left -= 1;
+      $("chooseTimerTxt").textContent = left > 0 ? `(${left})` : "";
+      if (left <= 0) { clearInterval(chooseCountdown); chooseCountdown = null; }
+    }, 1000);
+  }
+
+  // Угадывающему — экран ожидания, пока партнёр выбирает слово
+  function onRoundWaiting({ round, totalRounds, drawerName }) {
+    showScreen("game");
+    if (round === 1) gameCounted = false;
+    state.isDrawer = false;
+    state.canDraw = false;
+    $("roundPill").textContent = `Раунд ${round}/${totalRounds}`;
+    clearCanvas(false);
+    $("tools").classList.add("hidden");
+    $("guessForm").classList.add("hidden");
+
+    $("chooseForDrawer").hidden = true;
+    $("chooseForGuesser").hidden = false;
+    $("chooseWaitText").textContent = `${drawerName || "Партнёр"} выбирает слово`;
+    $("chooseOverlay").classList.add("show");
+  }
+
+  // =========================================================
   //  ИГРА: старт раунда
   // =========================================================
-  function onGameStart({ drawerId, round, totalRounds, word, maskLength }) {
+  function onGameStart({ drawerId, round, totalRounds, word, maskLength, timeLeft }) {
+    hideChoose();
     showScreen("game");
     if (round === 1) gameCounted = false; // началась новая игра
     state.isDrawer = drawerId === state.myId;
@@ -262,6 +343,7 @@
       $("guessForm").classList.remove("hidden");
       $("guessInput").focus();
     }
+    if (timeLeft != null) updateTimer(timeLeft);
     setTimeout(() => banner.classList.remove("show"), 3500);
     // даём браузеру пересчитать раскладку (панель инструментов появилась/исчезла),
     // затем подгоняем размер холста под итоговое место
@@ -326,14 +408,18 @@
   let curSize = 6;
   let erasing = false;
 
+  // ВАЖНО: храним ВСЕ штрихи раунда в массиве (нормализованные координаты 0..1).
+  // Благодаря этому при изменении размера экрана (например, всплыла клавиатура
+  // при вводе догадки) мы просто перерисовываем холст из памяти — рисунок НЕ теряется.
+  let strokes = [];
+
   // Координаты храним нормализованными (0..1), чтобы у обоих игроков
   // рисунок совпадал независимо от размера экрана.
   function fitCanvas() {
     const wrap = canvas.parentElement;
     const dpr = window.devicePixelRatio || 1;
     const w = wrap.clientWidth, h = wrap.clientHeight;
-    // сохраняем текущий рисунок
-    const snapshot = canvas.width ? ctx.getImageData(0, 0, canvas.width, canvas.height) : null;
+    if (w === 0 || h === 0) return; // холст ещё не виден — не трогаем
     canvas.width = w * dpr;
     canvas.height = h * dpr;
     canvas.style.width = w + "px";
@@ -341,9 +427,21 @@
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
-    if (snapshot) { try { ctx.putImageData(snapshot, 0, 0); } catch (e) {} }
+    redraw(); // перерисовываем всё из памяти
   }
-  window.addEventListener("resize", () => { if (screens.game.classList.contains("is-active")) fitCanvas(); });
+
+  // Полная перерисовка холста из массива штрихов
+  function redraw() {
+    ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
+    for (const s of strokes) {
+      paintSegment(s.x0, s.y0, s.x1, s.y1, s.color, s.size, s.eraser);
+    }
+  }
+
+  // Реакция на изменение размера — БЕЗ потери рисунка
+  window.addEventListener("resize", () => {
+    if (screens.game.classList.contains("is-active")) fitCanvas();
+  });
 
   function getPos(e) {
     const r = canvas.getBoundingClientRect();
@@ -351,7 +449,8 @@
     return { x: (p.clientX - r.left) / r.width, y: (p.clientY - r.top) / r.height };
   }
 
-  function drawSegment(x0, y0, x1, y1, color, size, isEraser) {
+  // Низкоуровневая отрисовка одного сегмента (без сохранения в память)
+  function paintSegment(x0, y0, x1, y1, color, size, isEraser) {
     const w = canvas.clientWidth, h = canvas.clientHeight;
     ctx.globalCompositeOperation = isEraser ? "destination-out" : "source-over";
     ctx.strokeStyle = color;
@@ -361,6 +460,12 @@
     ctx.lineTo(x1 * w, y1 * h);
     ctx.stroke();
     ctx.globalCompositeOperation = "source-over";
+  }
+
+  // Отрисовка + запоминание штриха в память (чтобы пережить resize)
+  function drawSegment(x0, y0, x1, y1, color, size, isEraser) {
+    strokes.push({ x0, y0, x1, y1, color, size, eraser: isEraser });
+    paintSegment(x0, y0, x1, y1, color, size, isEraser);
   }
 
   function pointerDown(e) {
@@ -389,6 +494,7 @@
     });
   }
   function remoteStroke(s) {
+    // приходит штрих от рисующего — рисуем И запоминаем (чтобы пережить resize)
     drawSegment(s.x0, s.y0, s.x1, s.y1, s.color, s.size, s.eraser);
   }
 
@@ -400,6 +506,7 @@
   canvas.addEventListener("touchend", pointerUp);
 
   function clearCanvas(emit = true) {
+    strokes = []; // чистим и память тоже
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     if (emit) socket?.emit("draw:clear", { room: state.room });
   }

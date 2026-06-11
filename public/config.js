@@ -9,7 +9,7 @@
    const MY_SERVER = "https://draw-guess-abcd.onrender.com";
    ========================================================= */
 
-const MY_SERVER = "ВПИШИ_СЮДА_АДРЕС_СЕРВЕРА";
+const MY_SERVER = "https://draw-guess-server-tjpo.onrender.com";
 
 /* ↓↓↓ ниже ничего трогать не нужно ↓↓↓ */
 window.SERVER_URL =

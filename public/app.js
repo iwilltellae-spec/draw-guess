@@ -32,8 +32,11 @@
       top = (sa.top || 0) + (csa.top || 0);
       bottom = (sa.bottom || 0) + (csa.bottom || 0);
 
-      // запас, если SDK старый и инсеты не пришли, но приложение развёрнуто
-      if (top === 0 && !tg.isExpanded) top = 0;
+      // ВАЖНО: на многих клиентах Telegram инсеты приходят как 0,
+      // хотя сверху всё равно есть шапка бота. Поэтому когда инсеты
+      // не дали запаса — добавляем гарантированный отступ под шапку.
+      const MIN_TG_HEADER = 56; // примерная высота шапки Telegram
+      if (top < MIN_TG_HEADER) top = MIN_TG_HEADER;
     }
     root.style.setProperty("--tg-top", top + "px");
     root.style.setProperty("--tg-bottom", bottom + "px");

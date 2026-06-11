@@ -4,14 +4,25 @@ import { createServer } from "http";
 import { Server } from "socket.io";
 import cors from "cors";
 import { WORDS } from "./words.js";
-import { PICTURES_META } from "./pictures.js";
+
+// Безопасная загрузка базы картинок для коопа.
+// Если pictures.js устарел/повреждён — сервер НЕ падает, просто кооп будет
+// с пустой базой (а версус продолжит работать).
+let PICTURES_META = [];
+try {
+  const mod = await import("./pictures.js");
+  if (Array.isArray(mod.PICTURES_META)) PICTURES_META = mod.PICTURES_META;
+  else console.error("⚠️ pictures.js загружен, но не содержит PICTURES_META");
+} catch (e) {
+  console.error("⚠️ Не удалось загрузить pictures.js (кооп будет недоступен):", e.message);
+}
 
 const SERVER_VERSION = "coop-1.0"; // версия для проверки, что Render обновился
 
 const app = express();
 app.use(cors());
 app.get("/", (_req, res) => res.send("Draw & Guess server is running 💕 — version: " + SERVER_VERSION + ", coop: ON"));
-app.get("/health", (_req, res) => res.json({ ok: true, version: SERVER_VERSION, coop: true, pictures: PICTURES_META.length, rooms: rooms.size }));
+app.get("/health", (_req, res) => res.json({ ok: true, version: SERVER_VERSION, coop: PICTURES_META.length > 0, pictures: PICTURES_META.length, rooms: rooms.size }));
 
 const httpServer = createServer(app);
 const io = new Server(httpServer, {

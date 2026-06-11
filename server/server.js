@@ -4,6 +4,7 @@ import { createServer } from "http";
 import { Server } from "socket.io";
 import cors from "cors";
 import { WORDS } from "./words.js";
+import { PICTURES_META } from "./pictures.js";
 
 const app = express();
 app.use(cors());
@@ -72,6 +73,122 @@ function publicPlayers(room) {
   }));
 }
 
+// =========================================================
+//  РЕЖИМ "КООП ПРОТИВ БОТА"
+//  Бот "рисует" картинку (клиенты рисуют её сами по id),
+//  оба игрока угадывают в общий чат. Сервер — единый источник
+//  времени, выбора картинок и проверки догадок.
+// =========================================================
+const COOP_REVEAL = 0.35; // доля картинки, нарисованная мгновенно в начале (затравка)
+
+function coopDeck(room) {
+  // колода картинок по выбранной теме, без повторов в рамках сессии
+  let pool = PICTURES_META;
+  if (room.coop.theme && room.coop.theme !== "mix") {
+    pool = PICTURES_META.filter((p) => p.cat === room.coop.theme);
+  }
+  if (pool.length === 0) pool = PICTURES_META;
+  return shuffle(pool.map((p) => p.id));
+}
+
+function coopNextPic(room) {
+  if (!room.coop.deck || room.coop.deck.length === 0) room.coop.deck = coopDeck(room);
+  return room.coop.deck.pop();
+}
+
+function startCoop(room) {
+  room.coop.roundNo = 0;
+  room.coop.correct = 0;
+  room.coop.score = 0;
+  room.coop.streak = 0;
+  room.coop.deck = coopDeck(room);
+  coopNextRound(room);
+}
+
+function coopNextRound(room) {
+  if (room.timer) { clearInterval(room.timer); room.timer = null; }
+  room.coop.roundNo += 1;
+
+  if (room.coop.roundNo > room.coop.totalRounds) return coopEnd(room);
+  if (room.players.length < 1) return;
+
+  const picId = coopNextPic(room);
+  const meta = PICTURES_META[picId];
+  room.coop.curPicId = picId;
+  room.coop.curName = meta.name;
+  room.coop.curAlt = meta.alt || [];
+  room.coop.solved = false;
+  room.coop.endsAt = Date.now() + room.coop.roundTime * 1000;
+  room.coop.seed = Math.floor(Math.random() * 1e9); // для одинаковой "дрожи" линий
+
+  // всем — старт раунда (без имени! только id картинки, длина слова, подсказки)
+  io.to(room.code).emit("coop:round", {
+    round: room.coop.roundNo,
+    totalRounds: room.coop.totalRounds,
+    picId,
+    seed: room.coop.seed,
+    maskLength: meta.name.length,
+    timeLeft: room.coop.roundTime,
+    revealStart: COOP_REVEAL,
+    drawSpeed: room.coop.drawSpeed,
+    hintsOn: room.coop.hintsOn,
+    correct: room.coop.correct,
+    score: room.coop.score,
+    streak: room.coop.streak,
+  });
+
+  if (room.timer) clearInterval(room.timer);
+  room.timer = setInterval(() => {
+    const left = Math.max(0, Math.round((room.coop.endsAt - Date.now()) / 1000));
+    io.to(room.code).emit("coop:tick", { left });
+    // подсказка: на последней четверти времени открываем первую букву
+    if (room.coop.hintsOn && !room.coop.hintSent && left <= room.coop.roundTime * 0.35) {
+      room.coop.hintSent = true;
+      io.to(room.code).emit("coop:hint", { firstLetter: room.coop.curName[0] });
+    }
+    if (left <= 0 && !room.coop.solved) coopEndRound(room, false, null);
+  }, 1000);
+  room.coop.hintSent = false;
+}
+
+function coopEndRound(room, solved, byPlayer) {
+  if (room.timer) { clearInterval(room.timer); room.timer = null; }
+  if (solved) {
+    // очки по скорости: чем больше времени осталось, тем больше
+    const left = Math.max(0, (room.coop.endsAt - Date.now()) / 1000);
+    const speedBonus = Math.round((left / room.coop.roundTime) * 50);
+    room.coop.streak += 1;
+    const streakBonus = room.coop.streak >= 3 ? (room.coop.streak * 5) : 0;
+    const gained = 50 + speedBonus + streakBonus;
+    room.coop.score += gained;
+    room.coop.correct += 1;
+    io.to(room.code).emit("coop:result", {
+      solved: true, word: room.coop.curName,
+      byName: byPlayer ? byPlayer.name : null,
+      gained, streak: room.coop.streak,
+      correct: room.coop.correct, score: room.coop.score,
+    });
+  } else {
+    room.coop.streak = 0;
+    io.to(room.code).emit("coop:result", {
+      solved: false, word: room.coop.curName,
+      gained: 0, streak: 0,
+      correct: room.coop.correct, score: room.coop.score,
+    });
+  }
+  room.coop.curName = null;
+  setTimeout(() => coopNextRound(room), 2800);
+}
+
+function coopEnd(room) {
+  if (room.timer) { clearInterval(room.timer); room.timer = null; }
+  io.to(room.code).emit("coop:over", {
+    correct: room.coop.correct,
+    total: room.coop.totalRounds,
+    score: room.coop.score,
+  });
+}
+
 function normalize(s) {
   return String(s).toLowerCase().trim()
     .replace(/ё/g, "е")
@@ -98,7 +215,8 @@ function levenshtein(a, b) {
 // ---- Игровой цикл ----
 function startGame(room) {
   room.round = 0;
-  room.deck = shuffle(WORDS); // свежая перетасованная колода на каждую игру
+  room.drawerIndex = -1;       // всегда сбрасываем, чтобы рисующий считался корректно
+  room.deck = shuffle(WORDS);  // свежая перетасованная колода на каждую игру
   room.players.forEach((p) => (p.score = 0));
   nextRound(room);
 }
@@ -113,8 +231,13 @@ function nextRound(room) {
   if (room.round > room.totalRounds) return endGame(room);
   if (room.players.length < 2) return;
 
-  // Чередуем рисующего
+  // Чередуем рисующего (с защитой от выхода за границы массива)
+  if (room.drawerIndex == null || room.drawerIndex < 0) room.drawerIndex = -1;
   room.drawerIndex = (room.drawerIndex + 1) % room.players.length;
+  const drawer = room.players[room.drawerIndex];
+  if (!drawer) { // подстраховка: вдруг состав изменился
+    room.drawerIndex = 0;
+  }
   room.drawerId = room.players[room.drawerIndex].id;
   room.word = null;
   room.guessed = false;
@@ -211,6 +334,92 @@ function endGame(room) {
 // ---- Сокеты ----
 io.on("connection", (socket) => {
 
+  // ---------- КООП ПРОТИВ БОТА ----------
+  socket.on("coop:create", ({ name, rounds, theme, roundTime, hintsOn, drawSpeed }) => {
+    const code = makeCode();
+    let total = parseInt(rounds, 10);
+    if (!Number.isFinite(total)) total = 10;
+    total = Math.max(1, Math.min(99, total));
+    let rt = parseInt(roundTime, 10);
+    if (![30, 45, 60].includes(rt)) rt = 45;
+    const speed = ["slow", "normal", "fast"].includes(drawSpeed) ? drawSpeed : "normal";
+    const room = {
+      code, mode: "coop", players: [], drawerId: null, timer: null,
+      coop: {
+        totalRounds: total,
+        theme: theme || "mix",
+        roundTime: rt,
+        hintsOn: hintsOn !== false,
+        drawSpeed: speed,
+        deck: null, roundNo: 0, correct: 0, score: 0, streak: 0,
+        curPicId: null, curName: null, curAlt: [], endsAt: 0, seed: 0,
+      },
+    };
+    rooms.set(code, room);
+    joinRoom(socket, room, name);
+    socket.emit("room:created", { room: code, mode: "coop" });
+  });
+
+  socket.on("coop:join", ({ name, room: code }) => {
+    const room = getRoom(code);
+    if (!room) return socket.emit("room:error", { message: "Комната не найдена 🔍" });
+    if (room.mode !== "coop") return socket.emit("room:error", { message: "Это код обычной игры! Открой вкладку «🎨 Друг против друга»" });
+    if (room.players.length >= 2) return socket.emit("room:error", { message: "Комната заполнена (макс. 2) 👫" });
+    joinRoom(socket, room, name);
+    io.to(room.code).emit("room:update", { players: publicPlayers(room) });
+    // как только второй зашёл — старт
+    if (room.players.length === 2) setTimeout(() => startCoop(room), 600);
+  });
+
+  // одиночный старт коопа (если решил играть один, без партнёра)
+  socket.on("coop:solo", () => {
+    for (const room of rooms.values()) {
+      if (room.mode === "coop" && room.players.some((p) => p.id === socket.id) && room.coop.roundNo === 0) {
+        startCoop(room);
+        break;
+      }
+    }
+  });
+
+  socket.on("coop:guess", ({ room: code, text }) => {
+    const room = getRoom(code);
+    if (!room || room.mode !== "coop" || !room.coop.curName || room.coop.solved) return;
+    const player = room.players.find((p) => p.id === socket.id);
+    if (!player) return;
+    const guess = normalize(text);
+    const answer = normalize(room.coop.curName);
+    const alts = (room.coop.curAlt || []).map(normalize);
+    if (guess === answer || alts.includes(guess)) {
+      room.coop.solved = true;
+      return coopEndRound(room, true, player);
+    }
+    // эхо догадки партнёру (чтобы видеть, что пишет другой)
+    socket.to(code).emit("coop:peer-guess", { name: player.name, text });
+    // "почти угадал"
+    const d = levenshtein(guess, answer);
+    if (d > 0 && d <= 2 && answer.length > 3) socket.emit("coop:close");
+  });
+
+  socket.on("coop:skip", ({ room: code }) => {
+    const room = getRoom(code);
+    if (!room || room.mode !== "coop" || room.coop.solved || !room.coop.curName) return;
+    coopEndRound(room, false, null);
+  });
+
+  socket.on("coop:restart", ({ room: code }) => {
+    const room = getRoom(code);
+    if (!room || room.mode !== "coop") return;
+    startCoop(room);
+  });
+
+  socket.on("coop:sync", ({ room: code }) => {
+    const room = getRoom(code);
+    if (!room || room.mode !== "coop" || !room.coop.endsAt) return;
+    const left = Math.max(0, Math.round((room.coop.endsAt - Date.now()) / 1000));
+    socket.emit("coop:tick", { left });
+  });
+  // ---------- /КООП ----------
+
   socket.on("room:create", ({ name, rounds }) => {
     const code = makeCode();
     let total = parseInt(rounds, 10);
@@ -228,12 +437,16 @@ io.on("connection", (socket) => {
   socket.on("room:join", ({ name, room: code }) => {
     const room = getRoom(code);
     if (!room) return socket.emit("room:error", { message: "Комната не найдена 🔍" });
+    if (room.mode === "coop") return socket.emit("room:error", { message: "Это код кооп-режима! Открой вкладку «🤖 Кооп против бота»" });
     if (room.players.length >= 2) return socket.emit("room:error", { message: "Комната заполнена (макс. 2) 👫" });
     joinRoom(socket, room, name);
     // Второй игрок зашёл — стартуем!
     if (room.players.length === 2) {
       io.to(room.code).emit("room:update", { players: publicPlayers(room) });
-      setTimeout(() => startGame(room), 600);
+      setTimeout(() => {
+        // перепроверяем: вдруг кто-то вышел за эти 0.6 сек
+        if (room.players.length === 2) startGame(room);
+      }, 600);
     }
   });
 

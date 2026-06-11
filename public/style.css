@@ -13,8 +13,12 @@
   --glass-strong:rgba(255,255,255,.78);
   --shadow:0 10px 30px rgba(155,109,255,.18);
   --radius:22px;
-  --safe-top:env(safe-area-inset-top,0px);
-  --safe-bot:env(safe-area-inset-bottom,0px);
+  /* отступы под шапку Telegram (--tg-top/--tg-bottom задаёт JS) + чёлку телефона */
+  --tg-top:0px;
+  --tg-bottom:0px;
+  --tg-vh:100dvh;
+  --safe-top:max(env(safe-area-inset-top,0px), var(--tg-top));
+  --safe-bot:max(env(safe-area-inset-bottom,0px), var(--tg-bottom));
 }
 
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -28,7 +32,7 @@ body{
   overscroll-behavior:none;
   -webkit-user-select:none;user-select:none;
 }
-#app{height:100dvh;position:relative}
+#app{height:var(--tg-vh,100dvh);min-height:100dvh;position:relative}
 
 /* ===== Экраны ===== */
 .screen{
@@ -38,7 +42,7 @@ body{
   padding:calc(14px + var(--safe-top)) 14px calc(14px + var(--safe-bot));
 }
 .screen.is-active{display:flex}
-.screen--lobby,.screen--wait{align-items:center;justify-content:center}
+.screen--lobby,.screen--wait{align-items:center;justify-content:safe center;overflow-y:auto}
 
 /* ===== Карточки / стекло ===== */
 .glass{

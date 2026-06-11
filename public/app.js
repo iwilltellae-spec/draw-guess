@@ -8,9 +8,43 @@
     tg.ready();
     tg.expand();
     try { tg.setHeaderColor("#ffe3ee"); tg.setBackgroundColor("#ffe3ee"); } catch (e) {}
+    // не даём свайпом случайно закрыть/свернуть приложение во время рисования
+    try { tg.disableVerticalSwipes && tg.disableVerticalSwipes(); } catch (e) {}
+    try { tg.enableClosingConfirmation && tg.enableClosingConfirmation(); } catch (e) {}
   }
   const tgUser = tg?.initDataUnsafe?.user;
   const tgName = tgUser ? (tgUser.first_name || tgUser.username || "") : "";
+
+  // ---- Правильные отступы под шапку Telegram ----
+  // Внутри Telegram сверху есть его панель (кнопка закрытия, имя бота).
+  // env(safe-area-inset-top) её НЕ учитывает, поэтому берём отступы из SDK.
+  function applyTelegramInsets() {
+    const root = document.documentElement;
+    let top = 0, bottom = 0;
+    if (tg) {
+      // высота, реально доступная приложению (без клавиатуры и т.п.)
+      const vh = tg.viewportStableHeight || tg.viewportHeight;
+      if (vh) root.style.setProperty("--tg-vh", vh + "px");
+
+      // safe area телефона (чёлка) + content safe area (шапка Telegram)
+      const sa = tg.safeAreaInset || {};
+      const csa = tg.contentSafeAreaInset || {};
+      top = (sa.top || 0) + (csa.top || 0);
+      bottom = (sa.bottom || 0) + (csa.bottom || 0);
+
+      // запас, если SDK старый и инсеты не пришли, но приложение развёрнуто
+      if (top === 0 && !tg.isExpanded) top = 0;
+    }
+    root.style.setProperty("--tg-top", top + "px");
+    root.style.setProperty("--tg-bottom", bottom + "px");
+  }
+  applyTelegramInsets();
+  if (tg) {
+    tg.onEvent && tg.onEvent("viewportChanged", applyTelegramInsets);
+    tg.onEvent && tg.onEvent("safeAreaChanged", applyTelegramInsets);
+    tg.onEvent && tg.onEvent("contentSafeAreaChanged", applyTelegramInsets);
+  }
+  window.addEventListener("resize", applyTelegramInsets);
 
   // ---- DOM ----
   const $ = (id) => document.getElementById(id);

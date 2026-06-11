@@ -32,14 +32,17 @@ body{
   overscroll-behavior:none;
   -webkit-user-select:none;user-select:none;
 }
-#app{height:var(--tg-vh,100dvh);min-height:100dvh;position:relative}
+#app{height:var(--tg-vh,100dvh);position:relative;overflow:hidden}
 
 /* ===== Экраны ===== */
 .screen{
-  position:absolute;inset:0;
+  /* верх экрана опускаем ниже шапки Telegram через --safe-top,
+     низ поднимаем над домашней панелью через --safe-bot */
+  position:absolute;
+  top:var(--safe-top); right:0; bottom:var(--safe-bot); left:0;
   display:none;
   flex-direction:column;
-  padding:calc(14px + var(--safe-top)) 14px calc(14px + var(--safe-bot));
+  padding:14px 14px;
 }
 .screen.is-active{display:flex}
 .screen--lobby,.screen--wait{align-items:center;justify-content:safe center;overflow-y:auto}
@@ -183,7 +186,9 @@ input:focus{box-shadow:inset 0 0 0 2px var(--violet)}
 @keyframes spin{to{transform:rotate(360deg)}}
 
 /* ===== Игровой экран ===== */
-.screen--game{gap:6px;padding-top:calc(6px + var(--safe-top));padding-bottom:calc(8px + var(--safe-bot))}
+.screen--game{gap:6px;padding-top:6px;padding-bottom:8px}
+/* явная гарантия для кооп-экрана: верх ниже шапки Telegram, как и у обычной игры */
+#coopGame, #game{ top:var(--safe-top); bottom:var(--safe-bot); }
 .topbar{
   display:flex;align-items:center;justify-content:space-between;
   border-radius:16px;padding:8px 12px;gap:8px;

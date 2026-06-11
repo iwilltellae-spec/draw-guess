@@ -21,20 +21,77 @@
           <p class="logo__sub">игра для двоих 💕</p>
         </div>
 
+        <div class="mode-pick">
+          <button type="button" class="mode-tab is-active" data-mode="versus">🎨 Друг против друга</button>
+          <button type="button" class="mode-tab" data-mode="coop">🤖 Кооп против бота</button>
+        </div>
+
         <label class="field">
           <span>Твоё имя</span>
           <input id="nameInput" type="text" maxlength="16" placeholder="Например, Зайка" autocomplete="off" />
         </label>
 
-        <div class="rounds-pick">
-          <span class="rounds-pick__label">Раундов в игре</span>
-          <div class="rounds-pick__row">
-            <button type="button" class="round-opt" data-rounds="2">2</button>
-            <button type="button" class="round-opt is-active" data-rounds="6">6</button>
-            <button type="button" class="round-opt" data-rounds="10">10</button>
-            <button type="button" class="round-opt" data-rounds="20">20</button>
-            <input type="number" id="roundsCustom" min="1" max="99" placeholder="свои" />
+        <!-- Настройки режима "друг против друга" -->
+        <div id="versusSettings">
+          <div class="rounds-pick">
+            <span class="rounds-pick__label">Раундов в игре</span>
+            <div class="rounds-pick__row">
+              <button type="button" class="round-opt" data-rounds="2">2</button>
+              <button type="button" class="round-opt is-active" data-rounds="6">6</button>
+              <button type="button" class="round-opt" data-rounds="10">10</button>
+              <button type="button" class="round-opt" data-rounds="20">20</button>
+              <input type="number" id="roundsCustom" min="1" max="99" placeholder="свои" />
+            </div>
           </div>
+        </div>
+
+        <!-- Настройки режима "кооп против бота" -->
+        <div id="coopSettings" hidden>
+          <div class="rounds-pick">
+            <span class="rounds-pick__label">Сколько рисунков</span>
+            <div class="rounds-pick__row">
+              <button type="button" class="coop-rounds-opt" data-rounds="5">5</button>
+              <button type="button" class="coop-rounds-opt is-active" data-rounds="10">10</button>
+              <button type="button" class="coop-rounds-opt" data-rounds="15">15</button>
+              <input type="number" id="coopRoundsCustom" min="1" max="99" placeholder="свои" />
+            </div>
+          </div>
+
+          <div class="rounds-pick">
+            <span class="rounds-pick__label">Тема</span>
+            <div class="theme-grid" id="themeGrid">
+              <button type="button" class="theme-opt is-active" data-theme="mix">🎲 Микс</button>
+              <button type="button" class="theme-opt" data-theme="animals">🐾 Животные</button>
+              <button type="button" class="theme-opt" data-theme="food">🍔 Еда</button>
+              <button type="button" class="theme-opt" data-theme="things">🏠 Предметы</button>
+              <button type="button" class="theme-opt" data-theme="nature">🌳 Природа</button>
+              <button type="button" class="theme-opt" data-theme="transport">🚗 Транспорт</button>
+              <button type="button" class="theme-opt" data-theme="love">💕 Про нас</button>
+            </div>
+          </div>
+
+          <div class="rounds-pick">
+            <span class="rounds-pick__label">Время на рисунок</span>
+            <div class="rounds-pick__row">
+              <button type="button" class="time-opt" data-time="30">30 сек</button>
+              <button type="button" class="time-opt is-active" data-time="45">45 сек</button>
+              <button type="button" class="time-opt" data-time="60">60 сек</button>
+            </div>
+          </div>
+
+          <div class="rounds-pick">
+            <span class="rounds-pick__label">Скорость рисования бота</span>
+            <div class="rounds-pick__row">
+              <button type="button" class="speed-opt" data-speed="slow">🐢 Медленно</button>
+              <button type="button" class="speed-opt is-active" data-speed="normal">🚶 Нормально</button>
+              <button type="button" class="speed-opt" data-speed="fast">🐇 Быстро</button>
+            </div>
+          </div>
+
+          <label class="switch-row">
+            <span>💡 Подсказки (буква под конец)</span>
+            <input type="checkbox" id="hintsToggle" checked />
+          </label>
         </div>
 
         <div class="lobby-actions">
@@ -151,6 +208,42 @@
       </form>
     </section>
 
+    <!-- ЭКРАН 4: Кооп против бота -->
+    <section class="screen screen--game" id="coopGame">
+      <header class="topbar glass">
+        <div class="topbar__left">
+          <span class="round-pill" id="coopRoundPill">Рисунок 1</span>
+        </div>
+        <div class="topbar__center">
+          <span class="word-mask" id="coopMask">_ _ _ _</span>
+        </div>
+        <div class="topbar__right">
+          <span class="timer" id="coopTimer">--</span>
+        </div>
+      </header>
+
+      <div class="scoreboard glass coop-stats">
+        <div class="coop-stat"><b id="coopCorrect">0</b><span>угадано</span></div>
+        <div class="coop-stat"><b id="coopScore">0</b><span>очки</span></div>
+        <div class="coop-stat"><b id="coopStreak">0</b><span>серия 🔥</span></div>
+      </div>
+
+      <div class="banner" id="coopBanner"></div>
+
+      <div class="canvas-wrap">
+        <canvas id="coopBoard"></canvas>
+        <div class="guess-badge" id="coopBadge"><span>🤖 Бот рисует…</span></div>
+      </div>
+
+      <div class="coop-bottom">
+        <form class="guessbar glass" id="coopForm">
+          <input id="coopInput" type="text" placeholder="Что это? Пишите оба!" autocomplete="off" />
+          <button type="submit" class="btn btn--primary btn--round">➤</button>
+        </form>
+        <button class="btn btn--ghost btn--small coop-skip" id="coopSkipBtn">⏭️ Пропустить</button>
+      </div>
+    </section>
+
   </div>
 
   <!-- Тост-уведомления -->
@@ -190,6 +283,8 @@
   <script src="config.js"></script>
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
   <script src="words.js"></script>
+  <script src="pictures.js"></script>
+  <script src="botdraw.js"></script>
   <script src="app.js"></script>
 <script defer src="https://static.cloudflareinsights.com/beacon.min.js/v833ccba57c9e4d2798f2e76cebdd09a11778172276447" integrity="sha512-57MDmcccJXYtNnH+ZiBwzC4jb2rvgVCEokYN+L/nLlmO8rfYT/gIpW2A569iJ/3b+0UEasghjuZH/ma3wIs/EQ==" data-cf-beacon='{"version":"2024.11.0","token":"1954b47c125f43f8b4338b3c4f804e4f","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
 </body>

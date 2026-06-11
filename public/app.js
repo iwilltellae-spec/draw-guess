@@ -49,7 +49,7 @@
   // Антилаг: когда возвращаемся в приложение — просим у сервера актуальное время
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden && socket && state.room) {
-      socket.emit("timer:sync", { room: state.room });
+      socket.emit(state.mode === "coop" ? "coop:sync" : "timer:sync", { room: state.room });
     }
   });
 
@@ -59,6 +59,7 @@
     lobby: $("lobby"),
     wait: $("waitRoom"),
     game: $("game"),
+    coopGame: $("coopGame"),
   };
   function showScreen(name) {
     Object.values(screens).forEach((s) => s.classList.remove("is-active"));
@@ -69,6 +70,7 @@
   const state = {
     name: tgName || "",
     room: null,
+    mode: "versus",    // versus | coop
     myId: null,
     isDrawer: false,
     players: [],
@@ -127,11 +129,22 @@
 
     socket.on("connect_error", () => toast("Не получается подключиться к серверу 😕"));
 
-    socket.on("room:created", ({ room }) => {
+    socket.on("room:created", ({ room, mode }) => {
       state.room = room;
+      state.mode = mode || "versus";
       $("roomCodeBig").textContent = room;
       showScreen("wait");
+      if (state.mode === "coop") showCoopSolo();
     });
+
+    // ---- события коопа ----
+    socket.on("coop:round", (d) => coopOnRound(d));
+    socket.on("coop:tick", (d) => coopOnTick(d));
+    socket.on("coop:hint", (d) => coopOnHint(d));
+    socket.on("coop:result", (d) => coopOnResult(d));
+    socket.on("coop:over", (d) => coopOnOver(d));
+    socket.on("coop:peer-guess", (d) => coopPeerGuess(d));
+    socket.on("coop:close", () => toast("🔥 Почти! Очень близко!"));
 
     socket.on("room:error", ({ message }) => {
       toast(message || "Ошибка комнаты");
@@ -159,7 +172,7 @@
     // при переподключении просим у сервера актуальное время (антилаг)
     socket.on("connect", () => {
       state.myId = socket.id;
-      if (state.room) socket.emit("timer:sync", { room: state.room });
+      if (state.room) socket.emit(state.mode === "coop" ? "coop:sync" : "timer:sync", { room: state.room });
     });
   }
 
@@ -182,7 +195,48 @@
     toast("Статистика сброшена 🧹");
   });
 
-  // ---- Выбор количества раундов ----
+  // ---- Переключение режима игры (друг против друга / кооп) ----
+  let lobbyMode = "versus";
+  const modeTabs = document.querySelectorAll(".mode-tab");
+  modeTabs.forEach((t) => {
+    t.addEventListener("click", () => {
+      modeTabs.forEach((x) => x.classList.remove("is-active"));
+      t.classList.add("is-active");
+      lobbyMode = t.dataset.mode;
+      const coop = lobbyMode === "coop";
+      $("versusSettings").hidden = coop;
+      $("coopSettings").hidden = !coop;
+      $("createBtn").textContent = coop ? "Создать кооп-комнату" : "Создать комнату";
+      $("lobbyHint").textContent = coop
+        ? "Бот рисует — вы угадываете вдвоём! Можно и одному 🤖"
+        : "Один создаёт комнату — другой вводит код 👫";
+    });
+  });
+
+  // ---- Настройки коопа ----
+  const coopCfg = { rounds: 10, theme: "mix", roundTime: 45, hintsOn: true, drawSpeed: "normal" };
+  function pickGroup(selector, attr, cb) {
+    const opts = document.querySelectorAll(selector);
+    opts.forEach((b) => b.addEventListener("click", () => {
+      opts.forEach((x) => x.classList.remove("is-active"));
+      b.classList.add("is-active");
+      cb(b.dataset[attr], b);
+    }));
+  }
+  pickGroup(".coop-rounds-opt", "rounds", (v) => { coopCfg.rounds = +v; $("coopRoundsCustom").value = ""; });
+  pickGroup(".theme-opt", "theme", (v) => { coopCfg.theme = v; });
+  pickGroup(".time-opt", "time", (v) => { coopCfg.roundTime = +v; });
+  pickGroup(".speed-opt", "speed", (v) => { coopCfg.drawSpeed = v; });
+  $("coopRoundsCustom").addEventListener("input", (e) => {
+    const v = parseInt(e.target.value, 10);
+    if (v >= 1 && v <= 99) {
+      document.querySelectorAll(".coop-rounds-opt").forEach((x) => x.classList.remove("is-active"));
+      coopCfg.rounds = v;
+    }
+  });
+  $("hintsToggle").addEventListener("change", (e) => { coopCfg.hintsOn = e.target.checked; });
+
+  // ---- Выбор количества раундов (versus) ----
   let chosenRounds = 6;
   const roundOpts = document.querySelectorAll(".round-opt");
   const roundsCustom = $("roundsCustom");
@@ -206,10 +260,15 @@
     const name = nameInput.value.trim();
     if (!name) return toast("Введи имя 🙂");
     state.name = name;
+    state.mode = lobbyMode;
     try { localStorage.setItem(NAME_KEY, name); } catch (e) {}
     gameCounted = false;
     if (!socket) connect();
-    socket.emit("room:create", { name, rounds: chosenRounds });
+    if (lobbyMode === "coop") {
+      socket.emit("coop:create", { name, rounds: coopCfg.rounds, theme: coopCfg.theme, roundTime: coopCfg.roundTime, hintsOn: coopCfg.hintsOn, drawSpeed: coopCfg.drawSpeed });
+    } else {
+      socket.emit("room:create", { name, rounds: chosenRounds });
+    }
   });
 
   $("joinBtn").addEventListener("click", () => {
@@ -218,11 +277,16 @@
     if (!name) return toast("Введи имя 🙂");
     if (code.length < 4) return toast("Введи код комнаты");
     state.name = name;
+    state.mode = lobbyMode;
     state.room = code;
     try { localStorage.setItem(NAME_KEY, name); } catch (e) {}
     gameCounted = false;
     if (!socket) connect();
-    socket.emit("room:join", { name, room: code });
+    if (lobbyMode === "coop") {
+      socket.emit("coop:join", { name, room: code });
+    } else {
+      socket.emit("room:join", { name, room: code });
+    }
   });
 
   $("roomInput").addEventListener("input", (e) => {
@@ -632,9 +696,174 @@
   $("overlayBtn").addEventListener("click", () => {
     $("overlay").classList.remove("show");
     if (overlayIsFinal) {
-      socket?.emit("game:restart", { room: state.room });
+      if (state.mode === "coop") socket?.emit("coop:restart", { room: state.room });
+      else socket?.emit("game:restart", { room: state.room });
     }
-    // для промежуточного раунда сервер сам пришлёт game:start
+    // для промежуточного раунда сервер сам пришлёт следующий старт
+  });
+
+  // =========================================================
+  //  РЕЖИМ "КООП ПРОТИВ БОТА" (клиент)
+  // =========================================================
+  const coopBoard = $("coopBoard");
+  const bot = window.makeBotDrawer(coopBoard);
+  const coop = {
+    raf: null, startAt: 0, roundTime: 45, revealStart: 0.35, finishFrac: 0.55,
+    serverLeft: null, lastTickAt: 0, solved: false, picName: null,
+  };
+
+  function coopFit() { bot.fit(); }
+  window.addEventListener("resize", () => {
+    if (screens.coopGame.classList.contains("is-active")) coopFit();
+  });
+
+  // показать "играть одному" на экране ожидания в коопе
+  function showCoopSolo() {
+    if (state.mode !== "coop") return;
+    $("waitHint").textContent = "Ждём партнёра… или начни один!";
+    let btn = $("coopSoloBtn");
+    if (!btn) {
+      btn = document.createElement("button");
+      btn.id = "coopSoloBtn";
+      btn.className = "btn btn--primary";
+      btn.textContent = "🤖 Играть одному";
+      btn.style.marginTop = "10px";
+      btn.addEventListener("click", () => socket?.emit("coop:solo"));
+      $("leaveWaitBtn").parentElement.insertBefore(btn, $("leaveWaitBtn"));
+    }
+    btn.hidden = false;
+  }
+
+  // старт раунда коопа: бот начинает рисовать
+  function coopOnRound(d) {
+    hideChoose();
+    $("overlay").classList.remove("show");
+    showScreen("coopGame");
+    coop.solved = false;
+    coop.roundTime = d.timeLeft;
+    coop.revealStart = d.revealStart;
+    // скорость рисования бота: чем меньше доля времени, тем быстрее он дорисовывает
+    coop.finishFrac = ({ slow: 0.8, normal: 0.5, fast: 0.28 })[d.drawSpeed] || 0.5;
+    coop.startAt = performance.now();
+    coop.serverLeft = d.timeLeft;
+    coop.lastTickAt = performance.now();
+
+    const meta = window.PICTURES[d.picId];
+    coop.picName = meta ? meta.name : "";
+
+    $("coopRoundPill").textContent = `Рисунок ${d.round}/${d.totalRounds}`;
+    $("coopMask").textContent = maskWord(d.maskLength);
+    $("coopMask").style.letterSpacing = "5px";
+    $("coopCorrect").textContent = d.correct;
+    $("coopScore").textContent = d.score;
+    $("coopStreak").textContent = d.streak;
+    $("coopInput").value = "";
+
+    const banner = $("coopBanner");
+    banner.textContent = "🤖 Бот начал рисовать — угадывайте!";
+    banner.className = "banner show guess";
+    setTimeout(() => banner.classList.remove("show"), 2500);
+    $("coopBadge").classList.add("show");
+    setTimeout(() => $("coopBadge").classList.remove("show"), 3000);
+
+    // готовим картинку и запускаем анимацию рисования
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      bot.fit();
+      if (meta) bot.setPicture(meta, d.seed);
+      startCoopAnim();
+    }));
+  }
+
+  // плавная анимация: progress зависит от прошедшего времени раунда
+  function startCoopAnim() {
+    if (coop.raf) cancelAnimationFrame(coop.raf);
+    const loop = () => {
+      // оценка оставшегося времени между серверными тиками
+      const sinceTick = (performance.now() - coop.lastTickAt) / 1000;
+      const left = Math.max(0, (coop.serverLeft ?? coop.roundTime) - sinceTick);
+      const elapsedFrac = 1 - left / coop.roundTime; // 0..1 по времени
+      // прогресс рисунка: стартовая затравка + дорисовываем к моменту finishFrac.
+      // Чем меньше finishFrac, тем БЫСТРЕЕ бот дорисовывает картинку.
+      let progress = coop.revealStart + (1 - coop.revealStart) * Math.min(1, elapsedFrac / coop.finishFrac);
+      if (coop.solved) progress = 1; // если угадали — дорисуем целиком
+      bot.render(progress);
+      if (!coop.solved && left > 0) coop.raf = requestAnimationFrame(loop);
+      else if (coop.solved) bot.render(1);
+    };
+    coop.raf = requestAnimationFrame(loop);
+  }
+
+  function coopOnTick(d) {
+    coop.serverLeft = d.left;
+    coop.lastTickAt = performance.now();
+    const t = $("coopTimer");
+    t.textContent = d.left;
+    t.classList.toggle("low", d.left <= 10);
+  }
+
+  function coopOnHint(d) {
+    // открываем первую букву в маске
+    const mask = $("coopMask").textContent.split(" ");
+    if (mask.length) { mask[0] = d.firstLetter; $("coopMask").textContent = mask.join(" "); }
+    toast("💡 Подсказка: первая буква «" + d.firstLetter + "»");
+  }
+
+  function coopPeerGuess(d) {
+    // показываем догадку партнёра тостом
+    toast(`${d.name}: ${d.text}`);
+  }
+
+  function coopOnResult(d) {
+    coop.solved = true;
+    if (coop.raf) cancelAnimationFrame(coop.raf);
+    bot.render(1); // дорисовываем полностью
+    $("coopCorrect").textContent = d.correct;
+    $("coopScore").textContent = d.score;
+    $("coopStreak").textContent = d.streak;
+
+    const banner = $("coopBanner");
+    if (d.solved) {
+      if (navigator.vibrate) navigator.vibrate(60);
+      const who = d.byName ? `${d.byName} угадал(а)!` : "Угадано!";
+      banner.textContent = `✅ ${who} «${d.word}» (+${d.gained})`;
+      banner.className = "banner show draw";
+    } else {
+      banner.textContent = `⏭️ Не угадали. Это «${d.word}»`;
+      banner.className = "banner show guess";
+    }
+    banner.classList.add("show");
+    setTimeout(() => banner.classList.remove("show"), 2600);
+  }
+
+  function coopOnOver(d) {
+    if (coop.raf) cancelAnimationFrame(coop.raf);
+    // рекорд пары
+    const best = getCoopBest();
+    let recordTxt = "";
+    if (d.score > best) {
+      setCoopBest(d.score);
+      recordTxt = " 🏆 Новый рекорд!";
+    } else {
+      recordTxt = ` (ваш рекорд: ${best})`;
+    }
+    showOverlay("🎉", `Угадали ${d.correct} из ${d.total}!`,
+      `Очки: ${d.score}${recordTxt}`, "Сыграть ещё", true);
+  }
+
+  // рекорд коопа в localStorage
+  function getCoopBest() { try { return +(localStorage.getItem("coop_best") || 0); } catch (e) { return 0; } }
+  function setCoopBest(v) { try { localStorage.setItem("coop_best", String(v)); } catch (e) {} }
+
+  // отправка догадки в коопе
+  $("coopForm").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const val = $("coopInput").value.trim();
+    if (!val) return;
+    socket?.emit("coop:guess", { room: state.room, text: val });
+    $("coopInput").value = "";
+  });
+  $("coopSkipBtn").addEventListener("click", () => {
+    socket?.emit("coop:skip", { room: state.room });
   });
 
 })();

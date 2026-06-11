@@ -3,7 +3,7 @@
    ---------------------------------------------------------
    После того как зальёшь СЕРВЕР на Render и получишь адрес
    вроде  https://draw-guess-xxxx.onrender.com
-   — впиши его ниже в кавычки вместо текста "https://draw-guess-two.vercel.app".
+   — впиши его ниже в кавычки вместо текста "https://draw-guess-server-tjpo.onrender.com".
 
    Пример правильно заполненного:
    const MY_SERVER = "https://draw-guess-abcd.onrender.com";

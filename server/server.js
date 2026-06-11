@@ -17,7 +17,7 @@ try {
   console.error("⚠️ Не удалось загрузить pictures.js (кооп будет недоступен):", e.message);
 }
 
-const SERVER_VERSION = "coop-1.0"; // версия для проверки, что Render обновился
+const SERVER_VERSION = "coop-1.1"; // версия для проверки, что Render обновился
 
 const app = express();
 app.use(cors());
